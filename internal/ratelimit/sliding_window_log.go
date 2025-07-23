@@ -2,26 +2,45 @@ package ratelimit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
+type SlidingWindowLogConfig struct {
+	WindowSize time.Duration
+	BucketSize int64
+	KeyPrefix  string
+	TTLBuffer  time.Duration
+}
+
 type SlidingWindowLogRateLimiter struct {
 	windowSizeSeconds int64
 	redisClient       *redis.Client
 	keyPrefix         string
 	bucketSize        int64
+	ttlBuffer         int64
 }
 
-func NewSlidingWindowLogRateLimiter(windowSize time.Duration, redisClient *redis.Client, keyPrefix string, bucketSize int64) *SlidingWindowLogRateLimiter {
-	return &SlidingWindowLogRateLimiter{
-		windowSizeSeconds: int64(windowSize.Seconds()),
-		redisClient:       redisClient,
-		keyPrefix:         keyPrefix,
-		bucketSize:        bucketSize,
+func NewSlidingWindowLogRateLimiter(config SlidingWindowLogConfig, redisClient *redis.Client) (*SlidingWindowLogRateLimiter, error) {
+	if config.WindowSize <= 0 || config.BucketSize <= 0 || redisClient == nil {
+		return nil, errors.New("invalid configuration")
 	}
+
+	ttlBuffer := config.TTLBuffer
+	if ttlBuffer <= 0 {
+		ttlBuffer = 60 * time.Second
+	}
+
+	return &SlidingWindowLogRateLimiter{
+		windowSizeSeconds: int64(config.WindowSize.Seconds()),
+		redisClient:       redisClient,
+		keyPrefix:         config.KeyPrefix,
+		bucketSize:        config.BucketSize,
+		ttlBuffer:         int64(ttlBuffer.Seconds()),
+	}, nil
 }
 
 func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key string, timestamp time.Time) (RateLimitResponse, error) {
@@ -36,6 +55,7 @@ func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key strin
 		local current_timestamp_nanos = tonumber(ARGV[2])
 		local bucket_size = tonumber(ARGV[3])
 		local window_size_seconds = tonumber(ARGV[4])
+		local ttl_buffer_seconds = tonumber(ARGV[5])
 		
 		redis.call('ZREMRANGEBYSCORE', key, '-inf', window_start_nanos)
 		
@@ -57,7 +77,7 @@ func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key strin
 		local member = current_timestamp_nanos .. ':' .. math.random()
 		redis.call('ZADD', key, current_timestamp_nanos, member)
 		
-		local ttl_seconds = window_size_seconds + 60
+		local ttl_seconds = window_size_seconds + ttl_buffer_seconds
 		redis.call('EXPIRE', key, ttl_seconds)
 		
 		local remaining = bucket_size - current_count - 1
@@ -66,7 +86,7 @@ func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key strin
 	`
 
 	result, err := swl.redisClient.Eval(ctx, script, []string{redisKey},
-		windowStartNanos, currentTimestampNanos, swl.bucketSize, swl.windowSizeSeconds).Result()
+		windowStartNanos, currentTimestampNanos, swl.bucketSize, swl.windowSizeSeconds, swl.ttlBuffer).Result()
 
 	if err != nil {
 		return RateLimitResponse{
@@ -104,7 +124,7 @@ func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key strin
 				"limit":              swl.bucketSize,
 				"window_size":        swl.windowSizeSeconds,
 				"reset_time":         resetTime,
-				"retry_after":        calculateRetryAfter(resetTime, timestamp),
+				"retry_after":        calculateRetryAfterSWL(resetTime, timestamp),
 			},
 		}, nil
 	}
@@ -121,7 +141,7 @@ func (swl *SlidingWindowLogRateLimiter) Reset(ctx context.Context, key string) e
 	return nil
 }
 
-func calculateRetryAfter(resetTime *time.Time, currentTime time.Time) *time.Duration {
+func calculateRetryAfterSWL(resetTime *time.Time, currentTime time.Time) *time.Duration {
 	if resetTime == nil {
 		return nil
 	}

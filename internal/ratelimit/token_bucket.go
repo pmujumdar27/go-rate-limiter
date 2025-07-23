@@ -2,26 +2,45 @@ package ratelimit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
+type TokenBucketConfig struct {
+	BucketSize          int64
+	RefillRatePerSecond int64
+	KeyPrefix           string
+	TTLBuffer           time.Duration
+}
+
 type TokenBucketRateLimiter struct {
 	bucketSize          int64
 	refillRatePerSecond int64
 	redisClient         *redis.Client
 	keyPrefix           string
+	ttlBuffer           int64
 }
 
-func NewTokenBucketRateLimiter(bucketSize int64, refillRatePerSecond int64, redisClient *redis.Client, keyPrefix string) *TokenBucketRateLimiter {
-	return &TokenBucketRateLimiter{
-		bucketSize:          bucketSize,
-		refillRatePerSecond: refillRatePerSecond,
-		redisClient:         redisClient,
-		keyPrefix:           keyPrefix,
+func NewTokenBucketRateLimiter(config TokenBucketConfig, redisClient *redis.Client) (*TokenBucketRateLimiter, error) {
+	if config.BucketSize <= 0 || config.RefillRatePerSecond <= 0 || redisClient == nil {
+		return nil, errors.New("invalid configuration")
 	}
+
+	ttlBuffer := config.TTLBuffer
+	if ttlBuffer <= 0 {
+		ttlBuffer = 60 * time.Second
+	}
+
+	return &TokenBucketRateLimiter{
+		bucketSize:          config.BucketSize,
+		refillRatePerSecond: config.RefillRatePerSecond,
+		redisClient:         redisClient,
+		keyPrefix:           config.KeyPrefix,
+		ttlBuffer:           int64(ttlBuffer.Seconds()),
+	}, nil
 }
 
 func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, timestamp time.Time) (RateLimitResponse, error) {
@@ -34,6 +53,7 @@ func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, tim
 		local bucket_size = tonumber(ARGV[1])
 		local refill_rate = tonumber(ARGV[2])
 		local current_time_nanos = tonumber(ARGV[3])
+		local ttl_buffer_seconds = tonumber(ARGV[4])
 		
 		local bucket_data = redis.call('HMGET', key, 'tokens', 'last_refill_time_nanos')
 		local current_tokens = bucket_size
@@ -62,8 +82,8 @@ func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, tim
 				'tokens', current_tokens,
 				'last_refill_time_nanos', current_time_nanos)
 			
-			local ttl_seconds = math.max(3600, bucket_size / refill_rate + 60)
-			redis.call('EXPIRE', key, ttl_seconds)
+					local ttl_seconds = math.max(3600, bucket_size / refill_rate + ttl_buffer_seconds)
+		redis.call('EXPIRE', key, ttl_seconds)
 			
 			return {0, current_tokens, next_token_time_nanos}
 		end
@@ -74,7 +94,7 @@ func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, tim
 			'tokens', remaining_tokens,
 			'last_refill_time_nanos', current_time_nanos)
 		
-		local ttl_seconds = math.max(3600, bucket_size / refill_rate + 60)
+		local ttl_seconds = math.max(3600, bucket_size / refill_rate + ttl_buffer_seconds)
 		redis.call('EXPIRE', key, ttl_seconds)
 		
 		local tokens_to_full = bucket_size - remaining_tokens
@@ -85,7 +105,7 @@ func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, tim
 	`
 
 	result, err := tb.redisClient.Eval(ctx, script, []string{redisKey},
-		tb.bucketSize, tb.refillRatePerSecond, currentTimestampNanos).Result()
+		tb.bucketSize, tb.refillRatePerSecond, currentTimestampNanos, tb.ttlBuffer).Result()
 
 	if err != nil {
 		return RateLimitResponse{

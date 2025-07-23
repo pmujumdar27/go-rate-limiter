@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pmujumdar27/go-rate-limiter/internal/handlers"
@@ -14,9 +15,22 @@ var (
 	rateLimiter ratelimit.RateLimiter
 )
 
+// TODO: Make this logic cleaner, and later maybe add an admin API to change the rate limiter
 func initRateLimiter(r *redis.Client) {
-	rateLimiter = ratelimit.NewTokenBucketRateLimiter(10, 2, r, "rate_limit:tb")
+	config := map[string]interface{}{
+		"window_size": 10 * time.Second,
+		"bucket_size": int64(10),
+	}
+
+	var err error
+	rateLimiter, err = ratelimit.NewRateLimiter(ratelimit.SlidingWindowCounterStrategy, r, "rate_limit:swc", config)
+	if err != nil {
+		panic(err)
+	}
+
+	// rateLimiter = ratelimit.NewTokenBucketRateLimiter(10, 2, r, "rate_limit:tb")
 	// rateLimiter = ratelimit.NewSlidingWindowLogRateLimiter(10*time.Second, r, "rate_limit:swl", 10)
+	// rateLimiter = ratelimit.NewSlidingWindowCounterRateLimiter(10*time.Second, r, "rate_limit:swc", 10)
 }
 
 func initRedisClient() {

@@ -19,6 +19,7 @@ type RateLimiter interface {
 type RateLimitStrategy string
 
 const (
-	TokenBucketStrategy   RateLimitStrategy = "token_bucket"
-	SlidingWindowStrategy RateLimitStrategy = "sliding_window"
+	TokenBucketStrategy          RateLimitStrategy = "token_bucket"
+	SlidingWindowStrategy        RateLimitStrategy = "sliding_window"
+	SlidingWindowCounterStrategy RateLimitStrategy = "sliding_window_counter"
 )
