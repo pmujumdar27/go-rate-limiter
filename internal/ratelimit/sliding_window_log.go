@@ -124,7 +124,7 @@ func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key strin
 				"limit":              swl.bucketSize,
 				"window_size":        swl.windowSizeSeconds,
 				"reset_time":         resetTime,
-				"retry_after":        calculateRetryAfterSWL(resetTime, timestamp),
+				"retry_after_s":      swl.calculateRetryAfter(resetTime, timestamp).Seconds(),
 			},
 		}, nil
 	}
@@ -141,9 +141,9 @@ func (swl *SlidingWindowLogRateLimiter) Reset(ctx context.Context, key string) e
 	return nil
 }
 
-func calculateRetryAfterSWL(resetTime *time.Time, currentTime time.Time) *time.Duration {
+func (swl *SlidingWindowLogRateLimiter) calculateRetryAfter(resetTime *time.Time, currentTime time.Time) time.Duration {
 	if resetTime == nil {
-		return nil
+		return 0
 	}
 
 	duration := resetTime.Sub(currentTime)
@@ -151,5 +151,5 @@ func calculateRetryAfterSWL(resetTime *time.Time, currentTime time.Time) *time.D
 		duration = 0
 	}
 
-	return &duration
+	return duration
 }

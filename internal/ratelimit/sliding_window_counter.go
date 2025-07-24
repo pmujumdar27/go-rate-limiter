@@ -160,8 +160,8 @@ func (swc *SlidingWindowCounterRateLimiter) IsAllowed(ctx context.Context, key s
 	metadata["remaining_requests"] = int64(0)
 	metadata["limit"] = swc.bucketSize
 	metadata["reset_time"] = resetTime
-	retryAfter := calculateRetryAfterSWC(currentCount, swc.bucketSize, swc.windowSizeNanos, previousCount, currentWindowStart, currentTimestampNanos)
-	metadata["retry_after_s"] = float64(retryAfter) / 1e9
+	retryAfter := swc.calculateRetryAfter(currentCount, previousCount, currentWindowStart, currentTimestampNanos)
+	metadata["retry_after_s"] = retryAfter.Seconds()
 
 	return RateLimitResponse{
 		Allowed:  false,
@@ -178,23 +178,25 @@ func (swc *SlidingWindowCounterRateLimiter) Reset(ctx context.Context, key strin
 	return err
 }
 
-func calculateRetryAfterSWC(currentCount, bucketSize, windowSizeNanos, previousCount, currentWindowStart, currentTimestamp int64) int64 {
+func (swc *SlidingWindowCounterRateLimiter) calculateRetryAfter(currentCount, previousCount, currentWindowStart, currentTimestamp int64) time.Duration {
 	if previousCount == 0 {
-		return (currentWindowStart + windowSizeNanos) - currentTimestamp
+		retryAfterNanos := (currentWindowStart + swc.windowSizeNanos) - currentTimestamp
+		return time.Duration(retryAfterNanos)
 	}
 
 	// currentCount + (1 - windowProgress) * previousCount = bucketSize
 	// windowProgress = 1 - (bucketSize - currentCount) / previousCount
-	requiredWindowProgress := 1.0 - float64(bucketSize-currentCount)/float64(previousCount)
+	requiredWindowProgress := 1.0 - float64(swc.bucketSize-currentCount)/float64(previousCount)
 
 	// If required progress is >= 1, we need to wait until next window
 	if requiredWindowProgress >= 1.0 {
-		return (currentWindowStart + windowSizeNanos) - currentTimestamp
+		retryAfterNanos := (currentWindowStart + swc.windowSizeNanos) - currentTimestamp
+		return time.Duration(retryAfterNanos)
 	}
 
-	futureTimestamp := currentWindowStart + int64(requiredWindowProgress*float64(windowSizeNanos))
+	futureTimestamp := currentWindowStart + int64(requiredWindowProgress*float64(swc.windowSizeNanos))
 
 	retryAfter := futureTimestamp - currentTimestamp
 
-	return retryAfter
+	return time.Duration(retryAfter)
 }

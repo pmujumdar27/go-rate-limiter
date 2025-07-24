@@ -144,7 +144,7 @@ func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, tim
 				"bucket_size":      tb.bucketSize,
 				"refill_rate":      tb.refillRatePerSecond,
 				"next_token_time":  nextTokenTime,
-				"retry_after":      retryAfter,
+				"retry_after_s":    retryAfter.Seconds(),
 			},
 		}, nil
 	}
