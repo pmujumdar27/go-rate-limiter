@@ -1,16 +1,19 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pmujumdar27/go-rate-limiter/internal/config"
 	"github.com/pmujumdar27/go-rate-limiter/internal/handlers"
 	"github.com/pmujumdar27/go-rate-limiter/internal/ratelimit"
 	"github.com/redis/go-redis/v9"
 )
 
 var (
+	cfg         *config.Config
 	redisClient *redis.Client
 	rateLimiter ratelimit.RateLimiter
 )
@@ -35,13 +38,19 @@ func initRateLimiter(r *redis.Client) {
 
 func initRedisClient() {
 	redisClient = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
+		Addr:     fmt.Sprintf("%s:%d", cfg.Redis.Host, cfg.Redis.Port),
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
 	})
 }
 
 func main() {
+	var err error
+	cfg, err = config.Load()
+	if err != nil {
+		panic(fmt.Errorf("failed to load config: %w", err))
+	}
+
 	initRedisClient()
 	initRateLimiter(redisClient)
 
@@ -59,9 +68,8 @@ func main() {
 		})
 	})
 
-	// Rate limiting endpoints
 	r.POST("/rate-limit", rateLimitHandler.RateLimit)
 	r.POST("/rate-limit/reset", rateLimitHandler.ResetRateLimit)
 
-	r.Run(":8080")
+	r.Run(cfg.Server.Port)
 }
