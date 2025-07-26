@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +37,8 @@ func (rlh *RateLimitHandler) RateLimit(c *gin.Context) {
 		})
 		return
 	}
+
+	rlh.setRateLimitHeaders(c, response)
 
 	if !response.Allowed {
 		c.JSON(http.StatusTooManyRequests, gin.H{
@@ -73,4 +76,24 @@ func (rlh *RateLimitHandler) ResetRateLimit(c *gin.Context) {
 		"message":   "Rate limit reset successfully",
 		"client_id": clientID,
 	})
+}
+
+func (rlh *RateLimitHandler) setRateLimitHeaders(c *gin.Context, response ratelimit.RateLimitResponse) {
+	c.Header("RateLimit-Limit", strconv.FormatInt(response.Limit, 10))
+	c.Header("RateLimit-Remaining", strconv.FormatInt(response.Remaining, 10))
+
+	resetSeconds := int64(time.Until(response.ResetTime).Seconds())
+
+	if resetSeconds < 0 {
+		resetSeconds = 0
+	}
+	c.Header("RateLimit-Reset", strconv.FormatInt(resetSeconds, 10))
+
+	if !response.Allowed && response.RetryAfter != nil {
+		retryAfterSeconds := int64(response.RetryAfter.Seconds())
+		if retryAfterSeconds < 0 {
+			retryAfterSeconds = 0
+		}
+		c.Header("Retry-After", strconv.FormatInt(retryAfterSeconds, 10))
+	}
 }

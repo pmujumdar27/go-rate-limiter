@@ -119,6 +119,16 @@ func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key strin
 		return RateLimitResponse{Err: err}, err
 	}
 
+	metadata := map[string]interface{}{
+		"current_count": currentCount,
+		"window_size":   swl.windowSizeSeconds,
+	}
+
+	resetTime := timestamp.Add(time.Duration(swl.windowSizeSeconds) * time.Second)
+	if resetTimeSeconds > 0 {
+		resetTime = time.Unix(resetTimeSeconds, 0)
+	}
+
 	if allowed == 1 {
 		remainingRequests := int64(0)
 		if len(resultArray) > 3 {
@@ -126,33 +136,26 @@ func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key strin
 				remainingRequests = remaining
 			}
 		}
-		return RateLimitResponse{
-			Allowed: true,
-			Metadata: map[string]interface{}{
-				"remaining_requests": remainingRequests,
-				"current_count":      currentCount,
-				"window_size":        swl.windowSizeSeconds,
-			},
-		}, nil
-	} else {
-		var resetTime *time.Time
-		if resetTimeSeconds > 0 {
-			rt := time.Unix(resetTimeSeconds, 0)
-			resetTime = &rt
-		}
 
 		return RateLimitResponse{
-			Allowed: false,
-			Metadata: map[string]interface{}{
-				"remaining_requests": 0,
-				"current_count":      currentCount,
-				"limit":              swl.bucketSize,
-				"window_size":        swl.windowSizeSeconds,
-				"reset_time":         resetTime,
-				"retry_after_s":      swl.calculateRetryAfter(resetTime, timestamp).Seconds(),
-			},
+			Allowed:   true,
+			Limit:     swl.bucketSize,
+			Remaining: remainingRequests,
+			ResetTime: resetTime,
+			Metadata:  metadata,
 		}, nil
 	}
+
+	retryAfter := swl.calculateRetryAfter(&resetTime, timestamp)
+
+	return RateLimitResponse{
+		Allowed:    false,
+		Limit:      swl.bucketSize,
+		Remaining:  0,
+		ResetTime:  resetTime,
+		RetryAfter: &retryAfter,
+		Metadata:   metadata,
+	}, nil
 }
 
 func (swl *SlidingWindowLogRateLimiter) Reset(ctx context.Context, key string) error {

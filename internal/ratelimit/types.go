@@ -8,9 +8,13 @@ import (
 )
 
 type RateLimitResponse struct {
-	Allowed  bool
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
-	Err      error
+	Allowed    bool                   `json:"allowed"`
+	Limit      int64                  `json:"limit"`
+	Remaining  int64                  `json:"remaining"`
+	ResetTime  time.Time              `json:"reset_time"`
+	RetryAfter *time.Duration         `json:"retry_after,omitempty"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	Err        error                  `json:"-"`
 }
 
 type RateLimiter interface {

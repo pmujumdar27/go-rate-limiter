@@ -160,6 +160,11 @@ func (swc *SlidingWindowCounterRateLimiter) IsAllowed(ctx context.Context, key s
 		"window_size":     swc.windowSizeNanos / NanosecondsPerSecond,
 	}
 
+	resetTime := time.Unix(0, currentWindowStart+swc.windowSizeNanos)
+	if resetTimeNanos > 0 {
+		resetTime = time.Unix(0, resetTimeNanos)
+	}
+
 	if allowed == 1 {
 		remainingRequests := int64(0)
 		if len(resultArray) > 5 {
@@ -167,29 +172,25 @@ func (swc *SlidingWindowCounterRateLimiter) IsAllowed(ctx context.Context, key s
 				remainingRequests = remaining
 			}
 		}
-		metadata["remaining_requests"] = remainingRequests
 
 		return RateLimitResponse{
-			Allowed:  true,
-			Metadata: metadata,
+			Allowed:   true,
+			Limit:     swc.bucketSize,
+			Remaining: remainingRequests,
+			ResetTime: resetTime,
+			Metadata:  metadata,
 		}, nil
 	}
 
-	var resetTime *time.Time
-	if resetTimeNanos > 0 {
-		rt := time.Unix(0, resetTimeNanos)
-		resetTime = &rt
-	}
-
-	metadata["remaining_requests"] = int64(0)
-	metadata["limit"] = swc.bucketSize
-	metadata["reset_time"] = resetTime
 	retryAfter := swc.calculateRetryAfter(currentCount, previousCount, currentWindowStart, currentTimestampNanos)
-	metadata["retry_after_s"] = retryAfter.Seconds()
 
 	return RateLimitResponse{
-		Allowed:  false,
-		Metadata: metadata,
+		Allowed:    false,
+		Limit:      swc.bucketSize,
+		Remaining:  0,
+		ResetTime:  resetTime,
+		RetryAfter: &retryAfter,
+		Metadata:   metadata,
 	}, nil
 }
 

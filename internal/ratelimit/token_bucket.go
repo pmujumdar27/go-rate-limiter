@@ -138,36 +138,39 @@ func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, tim
 		return RateLimitResponse{Err: err}, err
 	}
 
+	metadata := map[string]interface{}{
+		"bucket_size": tb.bucketSize,
+		"refill_rate": tb.refillRatePerSecond,
+	}
+
 	if allowed == 1 {
 		remainingTokens := tokens
 		fullTime := time.Unix(0, timeNanos)
+		metadata["bucket_full_time"] = fullTime
 
 		return RateLimitResponse{
-			Allowed: true,
-			Metadata: map[string]interface{}{
-				"remaining_tokens": remainingTokens,
-				"bucket_size":      tb.bucketSize,
-				"refill_rate":      tb.refillRatePerSecond,
-				"bucket_full_time": fullTime,
-			},
-		}, nil
-	} else {
-		currentTokens := tokens
-		nextTokenTime := time.Unix(0, timeNanos)
-		retryAfter := nextTokenTime.Sub(timestamp)
-
-		return RateLimitResponse{
-			Allowed: false,
-			Metadata: map[string]interface{}{
-				"current_tokens":   currentTokens,
-				"remaining_tokens": 0,
-				"bucket_size":      tb.bucketSize,
-				"refill_rate":      tb.refillRatePerSecond,
-				"next_token_time":  nextTokenTime,
-				"retry_after_s":    retryAfter.Seconds(),
-			},
+			Allowed:   true,
+			Limit:     tb.bucketSize,
+			Remaining: remainingTokens,
+			ResetTime: fullTime,
+			Metadata:  metadata,
 		}, nil
 	}
+
+	currentTokens := tokens
+	nextTokenTime := time.Unix(0, timeNanos)
+	retryAfter := nextTokenTime.Sub(timestamp)
+	metadata["current_tokens"] = currentTokens
+	metadata["next_token_time"] = nextTokenTime
+
+	return RateLimitResponse{
+		Allowed:    false,
+		Limit:      tb.bucketSize,
+		Remaining:  0,
+		ResetTime:  nextTokenTime,
+		RetryAfter: &retryAfter,
+		Metadata:   metadata,
+	}, nil
 }
 
 func (tb *TokenBucketRateLimiter) Reset(ctx context.Context, key string) error {
