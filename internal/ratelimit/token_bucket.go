@@ -113,12 +113,31 @@ func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, tim
 		}, err
 	}
 
-	resultArray := result.([]interface{})
-	allowed := resultArray[0].(int64) == 1
-	tokens := resultArray[1].(int64)
-	timeNanos := resultArray[2].(int64)
+	resultArray, ok := result.([]interface{})
+	if !ok || len(resultArray) < 3 {
+		err = errors.New("invalid redis response from token bucket script")
+		return RateLimitResponse{Err: err}, err
+	}
 
-	if allowed {
+	allowed, err := getInt64FromResult(resultArray[0])
+	if err != nil {
+		err = fmt.Errorf("failed to parse allowed flag: %w", err)
+		return RateLimitResponse{Err: err}, err
+	}
+	
+	tokens, err := getInt64FromResult(resultArray[1])
+	if err != nil {
+		err = fmt.Errorf("failed to parse tokens: %w", err)
+		return RateLimitResponse{Err: err}, err
+	}
+	
+	timeNanos, err := getInt64FromResult(resultArray[2])
+	if err != nil {
+		err = fmt.Errorf("failed to parse time: %w", err)
+		return RateLimitResponse{Err: err}, err
+	}
+
+	if allowed == 1 {
 		remainingTokens := tokens
 		fullTime := time.Unix(0, timeNanos)
 

@@ -94,13 +94,37 @@ func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key strin
 		}, err
 	}
 
-	resultArray := result.([]interface{})
-	allowed := resultArray[0].(int64) == 1
-	currentCount := resultArray[1].(int64)
-	resetTimeSeconds := resultArray[2].(int64)
+	resultArray, ok := result.([]interface{})
+	if !ok || len(resultArray) < 3 {
+		err = errors.New("invalid redis response from sliding window log script")
+		return RateLimitResponse{Err: err}, err
+	}
 
-	if allowed {
-		remainingRequests := resultArray[3].(int64)
+	allowed, err := getInt64FromResult(resultArray[0])
+	if err != nil {
+		err = fmt.Errorf("failed to parse allowed flag: %w", err)
+		return RateLimitResponse{Err: err}, err
+	}
+	
+	currentCount, err := getInt64FromResult(resultArray[1])
+	if err != nil {
+		err = fmt.Errorf("failed to parse current count: %w", err)
+		return RateLimitResponse{Err: err}, err
+	}
+	
+	resetTimeSeconds, err := getInt64FromResult(resultArray[2])
+	if err != nil {
+		err = fmt.Errorf("failed to parse reset time: %w", err)
+		return RateLimitResponse{Err: err}, err
+	}
+
+	if allowed == 1 {
+		remainingRequests := int64(0)
+		if len(resultArray) > 3 {
+			if remaining, err := getInt64FromResult(resultArray[3]); err == nil {
+				remainingRequests = remaining
+			}
+		}
 		return RateLimitResponse{
 			Allowed: true,
 			Metadata: map[string]interface{}{

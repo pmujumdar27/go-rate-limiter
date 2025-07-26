@@ -64,9 +64,6 @@ func (swc *SlidingWindowCounterRateLimiter) IsAllowed(ctx context.Context, key s
         local ttl_seconds = tonumber(ARGV[5])
         local window_progress = tonumber(ARGV[6])
 
-		redis.call('SET', 'debug:window_progress_raw', ARGV[6])
-		redis.call('SET', 'debug:window_progress_converted', tostring(window_progress))
-
         local current_window_key = key .. ':current'
         local previous_window_key = key .. ':previous'
 
@@ -124,11 +121,35 @@ func (swc *SlidingWindowCounterRateLimiter) IsAllowed(ctx context.Context, key s
 		return RateLimitResponse{Err: err}, err
 	}
 
-	allowed := resultArray[0].(int64) == 1
-	weightedCount := resultArray[1].(int64)
-	resetTimeNanos := resultArray[2].(int64)
-	currentCount := resultArray[3].(int64)
-	previousCount := resultArray[4].(int64)
+	allowed, err := getInt64FromResult(resultArray[0])
+	if err != nil {
+		err = fmt.Errorf("failed to parse allowed flag: %w", err)
+		return RateLimitResponse{Err: err}, err
+	}
+	
+	weightedCount, err := getInt64FromResult(resultArray[1])
+	if err != nil {
+		err = fmt.Errorf("failed to parse weighted count: %w", err)
+		return RateLimitResponse{Err: err}, err
+	}
+	
+	resetTimeNanos, err := getInt64FromResult(resultArray[2])
+	if err != nil {
+		err = fmt.Errorf("failed to parse reset time: %w", err)
+		return RateLimitResponse{Err: err}, err
+	}
+	
+	currentCount, err := getInt64FromResult(resultArray[3])
+	if err != nil {
+		err = fmt.Errorf("failed to parse current count: %w", err)
+		return RateLimitResponse{Err: err}, err
+	}
+	
+	previousCount, err := getInt64FromResult(resultArray[4])
+	if err != nil {
+		err = fmt.Errorf("failed to parse previous count: %w", err)
+		return RateLimitResponse{Err: err}, err
+	}
 
 	metadata := map[string]interface{}{
 		"weighted_count":  weightedCount,
@@ -138,10 +159,12 @@ func (swc *SlidingWindowCounterRateLimiter) IsAllowed(ctx context.Context, key s
 		"window_size":     swc.windowSizeNanos / 1e9,
 	}
 
-	if allowed {
+	if allowed == 1 {
 		remainingRequests := int64(0)
 		if len(resultArray) > 5 {
-			remainingRequests = resultArray[5].(int64)
+			if remaining, err := getInt64FromResult(resultArray[5]); err == nil {
+				remainingRequests = remaining
+			}
 		}
 		metadata["remaining_requests"] = remainingRequests
 

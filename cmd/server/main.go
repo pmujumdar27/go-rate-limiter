@@ -12,55 +12,61 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var (
-	cfg         *config.Config
+type Server struct {
+	config      *config.Config
 	redisClient *redis.Client
 	rateLimiter ratelimit.RateLimiter
-)
+	router      *gin.Engine
+}
+
+func NewServer(cfg *config.Config) (*Server, error) {
+	server := &Server{
+		config: cfg,
+	}
+
+	if err := server.setupRedis(); err != nil {
+		return nil, fmt.Errorf("failed to setup redis: %w", err)
+	}
+
+	if err := server.setupRateLimiter(); err != nil {
+		return nil, fmt.Errorf("failed to setup rate limiter: %w", err)
+	}
+
+	server.setupRoutes()
+	return server, nil
+}
+
+func (s *Server) setupRedis() error {
+	s.redisClient = redis.NewClient(&redis.Options{
+		Addr:     fmt.Sprintf("%s:%d", s.config.Redis.Host, s.config.Redis.Port),
+		Password: s.config.Redis.Password,
+		DB:       s.config.Redis.DB,
+	})
+	return nil
+}
 
 // TODO: Make this logic cleaner, and later maybe add an admin API to change the rate limiter
-func initRateLimiter(r *redis.Client) {
+func (s *Server) setupRateLimiter() error {
 	config := map[string]interface{}{
 		"window_size": 10 * time.Second,
 		"bucket_size": int64(10),
 	}
 
 	var err error
-	rateLimiter, err = ratelimit.NewRateLimiter(ratelimit.SlidingWindowCounterStrategy, r, "rate_limit:swc", config)
+	s.rateLimiter, err = ratelimit.NewRateLimiter(ratelimit.SlidingWindowCounterStrategy, s.redisClient, "rate_limit:swc", config)
 	if err != nil {
-		panic(err)
+		return err
 	}
-
-	// rateLimiter = ratelimit.NewTokenBucketRateLimiter(10, 2, r, "rate_limit:tb")
-	// rateLimiter = ratelimit.NewSlidingWindowLogRateLimiter(10*time.Second, r, "rate_limit:swl", 10)
-	// rateLimiter = ratelimit.NewSlidingWindowCounterRateLimiter(10*time.Second, r, "rate_limit:swc", 10)
+	return nil
 }
 
-func initRedisClient() {
-	redisClient = redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%d", cfg.Redis.Host, cfg.Redis.Port),
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
-	})
-}
+func (s *Server) setupRoutes() {
+	s.router = gin.Default()
+	rateLimitHandler := handlers.NewRateLimitHandler(s.rateLimiter)
 
-func main() {
-	var err error
-	cfg, err = config.Load()
-	if err != nil {
-		panic(fmt.Errorf("failed to load config: %w", err))
-	}
+	s.router.GET("/health", handlers.Health)
 
-	initRedisClient()
-	initRateLimiter(redisClient)
-
-	rateLimitHandler := handlers.NewRateLimitHandler(rateLimiter)
-
-	r := gin.Default()
-
-	r.GET("/health", handlers.Health)
-
-	r.GET("/", func(c *gin.Context) {
+	s.router.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"service": "go-rate-limiter",
 			"version": "1.0.0",
@@ -68,8 +74,26 @@ func main() {
 		})
 	})
 
-	r.POST("/rate-limit", rateLimitHandler.RateLimit)
-	r.POST("/rate-limit/reset", rateLimitHandler.ResetRateLimit)
+	s.router.POST("/rate-limit", rateLimitHandler.RateLimit)
+	s.router.POST("/rate-limit/reset", rateLimitHandler.ResetRateLimit)
+}
 
-	r.Run(cfg.Server.Port)
+func (s *Server) Run() error {
+	return s.router.Run(s.config.Server.Port)
+}
+
+func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		panic(fmt.Errorf("failed to load config: %w", err))
+	}
+
+	server, err := NewServer(cfg)
+	if err != nil {
+		panic(fmt.Errorf("failed to create server: %w", err))
+	}
+
+	if err := server.Run(); err != nil {
+		panic(fmt.Errorf("failed to run server: %w", err))
+	}
 }
