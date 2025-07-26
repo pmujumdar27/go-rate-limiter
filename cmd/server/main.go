@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pmujumdar27/go-rate-limiter/internal/config"
 	"github.com/pmujumdar27/go-rate-limiter/internal/handlers"
+	"github.com/pmujumdar27/go-rate-limiter/internal/middleware"
 	"github.com/pmujumdar27/go-rate-limiter/internal/ratelimit"
 	"github.com/redis/go-redis/v9"
 )
@@ -65,6 +66,7 @@ func (s *Server) setupRoutes() {
 	}
 
 	rateLimitHandler := handlers.NewRateLimitHandler(rateLimiter)
+	demoHandler := handlers.NewDemoHandler()
 
 	s.router.GET("/health", handlers.Health)
 
@@ -78,6 +80,12 @@ func (s *Server) setupRoutes() {
 
 	s.router.POST("/rate-limit", rateLimitHandler.RateLimit)
 	s.router.POST("/rate-limit/reset", rateLimitHandler.ResetRateLimit)
+
+	api := s.router.Group("/api")
+	{
+		api.GET("/unrestricted", demoHandler.UnrestrictedResource)
+		api.GET("/restricted", middleware.RateLimit(rateLimiter), demoHandler.RestrictedResource)
+	}
 
 	s.httpServer = &http.Server{
 		Addr:    s.config.Server.Port,
