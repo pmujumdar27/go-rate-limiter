@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/pmujumdar27/go-rate-limiter/internal/config"
+	"github.com/redis/go-redis/v9"
 )
 
 type TokenBucketConfig struct {
@@ -32,7 +32,7 @@ func NewTokenBucketRateLimiter(config TokenBucketConfig, redisClient *redis.Clie
 
 	ttlBufferSeconds := config.TTLBufferSeconds
 	if ttlBufferSeconds <= 0 {
-		ttlBufferSeconds = 60
+		ttlBufferSeconds = DefaultTTLBufferSeconds
 	}
 
 	return &TokenBucketRateLimiter{
@@ -68,7 +68,7 @@ func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, tim
 			last_refill_time_nanos = tonumber(bucket_data[2])
 		end
 		
-		local time_since_last_refill_seconds = (current_time_nanos - last_refill_time_nanos) / 1e9
+		local time_since_last_refill_seconds = (current_time_nanos - last_refill_time_nanos) / 1000000000 -- NanosecondsPerSecond
 		
 		local tokens_to_refill = time_since_last_refill_seconds * refill_rate
 		
@@ -77,14 +77,14 @@ func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, tim
 		if current_tokens < 1 then
 			local tokens_needed = 1 - current_tokens
 			local seconds_until_token = tokens_needed / refill_rate
-			local next_token_time_nanos = current_time_nanos + (seconds_until_token * 1e9)
+			local next_token_time_nanos = current_time_nanos + (seconds_until_token * 1000000000) -- NanosecondsPerSecond
 			
 			redis.call('HMSET', key, 
 				'tokens', current_tokens,
 				'last_refill_time_nanos', current_time_nanos)
 			
-					local ttl_seconds = math.max(3600, bucket_size / refill_rate + ttl_buffer_seconds)
-		redis.call('EXPIRE', key, ttl_seconds)
+			local ttl_seconds = math.max(60, bucket_size / refill_rate + ttl_buffer_seconds) -- MinimumTTLSeconds
+			redis.call('EXPIRE', key, ttl_seconds)
 			
 			return {0, current_tokens, next_token_time_nanos}
 		end
@@ -95,12 +95,12 @@ func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, tim
 			'tokens', remaining_tokens,
 			'last_refill_time_nanos', current_time_nanos)
 		
-		local ttl_seconds = math.max(3600, bucket_size / refill_rate + ttl_buffer_seconds)
+		local ttl_seconds = math.max(60, bucket_size / refill_rate + ttl_buffer_seconds) -- MinimumTTLSeconds
 		redis.call('EXPIRE', key, ttl_seconds)
 		
 		local tokens_to_full = bucket_size - remaining_tokens
 		local seconds_to_full = tokens_to_full / refill_rate
-		local full_time_nanos = current_time_nanos + (seconds_to_full * 1e9)
+		local full_time_nanos = current_time_nanos + (seconds_to_full * 1000000000) -- NanosecondsPerSecond
 		
 		return {1, remaining_tokens, full_time_nanos}
 	`
@@ -125,13 +125,13 @@ func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, tim
 		err = fmt.Errorf("failed to parse allowed flag: %w", err)
 		return RateLimitResponse{Err: err}, err
 	}
-	
+
 	tokens, err := getInt64FromResult(resultArray[1])
 	if err != nil {
 		err = fmt.Errorf("failed to parse tokens: %w", err)
 		return RateLimitResponse{Err: err}, err
 	}
-	
+
 	timeNanos, err := getInt64FromResult(resultArray[2])
 	if err != nil {
 		err = fmt.Errorf("failed to parse time: %w", err)
@@ -204,7 +204,7 @@ func (c *TokenBucketConstructor) NewFromConfig(config map[string]interface{}, re
 	if err != nil {
 		return nil, fmt.Errorf("token bucket strategy: %w", err)
 	}
-	
+
 	tokenBucketConfig := TokenBucketConfig{
 		BucketSize:          bucketSize,
 		RefillRatePerSecond: refillRate,
@@ -219,7 +219,7 @@ func (c *TokenBucketConstructor) ConvertConfig(rawConfig interface{}) (map[strin
 	if !ok {
 		return nil, fmt.Errorf("expected TokenBucketConfig, got %T", rawConfig)
 	}
-	
+
 	return map[string]interface{}{
 		"key_prefix":             cfg.KeyPrefix,
 		"ttl_buffer_seconds":     cfg.TTLBufferSeconds,

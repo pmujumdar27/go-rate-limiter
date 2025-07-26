@@ -28,6 +28,6 @@ type RateLimitStrategy string
 
 const (
 	TokenBucketStrategy          RateLimitStrategy = "token_bucket"
-	SlidingWindowStrategy        RateLimitStrategy = "sliding_window"
+	SlidingWindowLogStrategy     RateLimitStrategy = "sliding_window_log"
 	SlidingWindowCounterStrategy RateLimitStrategy = "sliding_window_counter"
 )

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/pmujumdar27/go-rate-limiter/internal/config"
+	"github.com/redis/go-redis/v9"
 )
 
 type SlidingWindowLogConfig struct {
@@ -32,7 +32,7 @@ func NewSlidingWindowLogRateLimiter(config SlidingWindowLogConfig, redisClient *
 
 	ttlBufferSeconds := config.TTLBufferSeconds
 	if ttlBufferSeconds <= 0 {
-		ttlBufferSeconds = 60
+		ttlBufferSeconds = DefaultTTLBufferSeconds
 	}
 
 	return &SlidingWindowLogRateLimiter{
@@ -48,7 +48,7 @@ func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key strin
 	redisKey := fmt.Sprintf("%s:%s", swl.keyPrefix, key)
 
 	currentTimestampNanos := timestamp.UnixNano()
-	windowStartNanos := currentTimestampNanos - (swl.windowSizeSeconds * 1e9)
+	windowStartNanos := currentTimestampNanos - (swl.windowSizeSeconds * NanosecondsPerSecond)
 
 	script := `
 		local key = KEYS[1]
@@ -69,7 +69,7 @@ func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key strin
 			
 			if #timestamps > 0 then
 				oldest_timestamp_nanos = tonumber(timestamps[2])
-				reset_time_seconds = (oldest_timestamp_nanos + (window_size_seconds * 1e9)) / 1e9
+				reset_time_seconds = (oldest_timestamp_nanos + (window_size_seconds * 1000000000)) / 1000000000 -- NanosecondsPerSecond
 			end
 			
 			return {0, current_count, reset_time_seconds}
@@ -106,13 +106,13 @@ func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key strin
 		err = fmt.Errorf("failed to parse allowed flag: %w", err)
 		return RateLimitResponse{Err: err}, err
 	}
-	
+
 	currentCount, err := getInt64FromResult(resultArray[1])
 	if err != nil {
 		err = fmt.Errorf("failed to parse current count: %w", err)
 		return RateLimitResponse{Err: err}, err
 	}
-	
+
 	resetTimeSeconds, err := getInt64FromResult(resultArray[2])
 	if err != nil {
 		err = fmt.Errorf("failed to parse reset time: %w", err)
@@ -202,7 +202,7 @@ func (c *SlidingWindowLogConstructor) NewFromConfig(config map[string]interface{
 	if err != nil {
 		return nil, fmt.Errorf("sliding window strategy: %w", err)
 	}
-	
+
 	slidingWindowLogConfig := SlidingWindowLogConfig{
 		WindowSize:       windowSize,
 		BucketSize:       bucketSize,
@@ -217,7 +217,7 @@ func (c *SlidingWindowLogConstructor) ConvertConfig(rawConfig interface{}) (map[
 	if !ok {
 		return nil, fmt.Errorf("expected SlidingWindowLogConfig, got %T", rawConfig)
 	}
-	
+
 	windowSize := time.Duration(cfg.WindowSizeSeconds) * time.Second
 	return map[string]interface{}{
 		"key_prefix":         cfg.KeyPrefix,

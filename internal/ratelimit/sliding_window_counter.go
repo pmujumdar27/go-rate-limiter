@@ -32,7 +32,7 @@ func NewSlidingWindowCounterRateLimiter(config SlidingWindowCounterConfig, redis
 
 	ttlBufferSeconds := config.TTLBufferSeconds
 	if ttlBufferSeconds <= 0 {
-		ttlBufferSeconds = 60
+		ttlBufferSeconds = DefaultTTLBufferSeconds
 	}
 
 	return &SlidingWindowCounterRateLimiter{
@@ -57,57 +57,57 @@ func (swc *SlidingWindowCounterRateLimiter) IsAllowed(ctx context.Context, key s
 	}
 
 	script := `
-        local key = KEYS[1]
-        local current_window_start = tonumber(ARGV[1])
-        local previous_window_start = tonumber(ARGV[2])
-        local bucket_size = tonumber(ARGV[3])
-        local window_size_nanos = tonumber(ARGV[4])
-        local ttl_seconds = tonumber(ARGV[5])
-        local window_progress = tonumber(ARGV[6])
+		local key = KEYS[1]
+		local current_window_start = tonumber(ARGV[1])
+		local previous_window_start = tonumber(ARGV[2])
+		local bucket_size = tonumber(ARGV[3])
+		local window_size_nanos = tonumber(ARGV[4])
+		local ttl_seconds = tonumber(ARGV[5])
+		local window_progress = tonumber(ARGV[6])
 
-        local current_window_key = key .. ':current'
-        local previous_window_key = key .. ':previous'
+		local current_window_key = key .. ':current'
+		local previous_window_key = key .. ':previous'
 
-        local current_count = 0
-        local previous_count = 0
+		local current_count = 0
+		local previous_count = 0
 
-        local current_window_data = redis.call('HMGET', current_window_key, 'count', 'window_start')
-        if current_window_data[1] and current_window_data[2] then
-            local stored_window_start = tonumber(current_window_data[2])
-            if stored_window_start == current_window_start then
-                current_count = tonumber(current_window_data[1])
-            elseif stored_window_start == previous_window_start then
-                previous_count = tonumber(current_window_data[1])
-            end
-        end
+		local current_window_data = redis.call('HMGET', current_window_key, 'count', 'window_start')
+		if current_window_data[1] and current_window_data[2] then
+			local stored_window_start = tonumber(current_window_data[2])
+			if stored_window_start == current_window_start then
+				current_count = tonumber(current_window_data[1])
+			elseif stored_window_start == previous_window_start then
+				previous_count = tonumber(current_window_data[1])
+			end
+		end
 
-        if previous_count == 0 then
-            local previous_window_data = redis.call('HMGET', previous_window_key, 'count', 'window_start')
-            if previous_window_data[1] and previous_window_data[2] and tonumber(previous_window_data[2]) == previous_window_start then
-                previous_count = tonumber(previous_window_data[1])
-            end
-        end
+		if previous_count == 0 then
+			local previous_window_data = redis.call('HMGET', previous_window_key, 'count', 'window_start')
+			if previous_window_data[1] and previous_window_data[2] and tonumber(previous_window_data[2]) == previous_window_start then
+				previous_count = tonumber(previous_window_data[1])
+			end
+		end
 
-        local previous_window_weight = 1 - window_progress
-        local weighted_count = math.floor(current_count + (previous_count * previous_window_weight))
+		local previous_window_weight = 1 - window_progress
+		local weighted_count = math.floor(current_count + (previous_count * previous_window_weight))
 
-        if weighted_count >= bucket_size then
-            local reset_time_nanos = current_window_start + window_size_nanos
-            return {0, weighted_count, reset_time_nanos, current_count, previous_count}
-        end
+		if weighted_count >= bucket_size then
+			local reset_time_nanos = current_window_start + window_size_nanos
+			return {0, weighted_count, reset_time_nanos, current_count, previous_count}
+		end
 
-        local new_current_count = current_count + 1
-        redis.call('HMSET', current_window_key, 'count', new_current_count, 'window_start', current_window_start)
-        redis.call('EXPIRE', current_window_key, ttl_seconds)
+		local new_current_count = current_count + 1
+		redis.call('HMSET', current_window_key, 'count', new_current_count, 'window_start', current_window_start)
+		redis.call('EXPIRE', current_window_key, ttl_seconds)
 
-        redis.call('HMSET', previous_window_key, 'count', previous_count, 'window_start', previous_window_start)
-        redis.call('EXPIRE', previous_window_key, ttl_seconds)
+		redis.call('HMSET', previous_window_key, 'count', previous_count, 'window_start', previous_window_start)
+		redis.call('EXPIRE', previous_window_key, ttl_seconds)
 
-        local remaining_requests = math.max(0, bucket_size - weighted_count - 1)
-        return {1, weighted_count + 1, 0, new_current_count, previous_count, remaining_requests}
-    `
+		local remaining_requests = math.max(0, bucket_size - weighted_count - 1)
+		return {1, weighted_count + 1, 0, new_current_count, previous_count, remaining_requests}
+	`
 
-	ttlSeconds := (swc.windowSizeNanos/1e9)*2 + swc.ttlBuffer
+	ttlSeconds := (swc.windowSizeNanos/NanosecondsPerSecond)*2 + swc.ttlBuffer
 
 	result, err := swc.redisClient.Eval(ctx, script, []string{redisKey},
 		currentWindowStart, previousWindowStart, swc.bucketSize, swc.windowSizeNanos, ttlSeconds, windowProgress).Result()
@@ -157,7 +157,7 @@ func (swc *SlidingWindowCounterRateLimiter) IsAllowed(ctx context.Context, key s
 		"current_count":   currentCount,
 		"previous_count":  previousCount,
 		"window_progress": windowProgress,
-		"window_size":     swc.windowSizeNanos / 1e9,
+		"window_size":     swc.windowSizeNanos / NanosecondsPerSecond,
 	}
 
 	if allowed == 1 {
