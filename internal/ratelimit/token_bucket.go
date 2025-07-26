@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pmujumdar27/go-rate-limiter/internal/config"
+	"github.com/pmujumdar27/go-rate-limiter/internal/metrics"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -45,6 +46,11 @@ func NewTokenBucketRateLimiter(config TokenBucketConfig, redisClient *redis.Clie
 }
 
 func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, timestamp time.Time) (RateLimitResponse, error) {
+	start := time.Now()
+	defer func() {
+		metrics.RateLimitDuration.WithLabelValues("token_bucket").Observe(time.Since(start).Seconds())
+	}()
+
 	redisKey := fmt.Sprintf("%s:%s", tb.keyPrefix, key)
 
 	currentTimestampNanos := timestamp.UnixNano()
@@ -105,14 +111,18 @@ func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, tim
 		return {1, remaining_tokens, full_time_nanos}
 	`
 
+	redisStart := time.Now()
 	result, err := tb.redisClient.Eval(ctx, script, []string{redisKey},
 		tb.bucketSize, tb.refillRatePerSecond, currentTimestampNanos, tb.ttlBuffer).Result()
+	metrics.RedisOperationDuration.WithLabelValues("eval").Observe(time.Since(redisStart).Seconds())
 
 	if err != nil {
+		metrics.RedisOperations.WithLabelValues("eval", "error").Inc()
 		return RateLimitResponse{
 			Err: err,
 		}, err
 	}
+	metrics.RedisOperations.WithLabelValues("eval", "success").Inc()
 
 	resultArray, ok := result.([]interface{})
 	if !ok || len(resultArray) < 3 {
@@ -144,6 +154,7 @@ func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, tim
 	}
 
 	if allowed == 1 {
+		metrics.RateLimitRequests.WithLabelValues("token_bucket", "allowed").Inc()
 		remainingTokens := tokens
 		fullTime := time.Unix(0, timeNanos)
 		metadata["bucket_full_time"] = fullTime
@@ -157,6 +168,7 @@ func (tb *TokenBucketRateLimiter) IsAllowed(ctx context.Context, key string, tim
 		}, nil
 	}
 
+	metrics.RateLimitRequests.WithLabelValues("token_bucket", "denied").Inc()
 	currentTokens := tokens
 	nextTokenTime := time.Unix(0, timeNanos)
 	retryAfter := nextTokenTime.Sub(timestamp)

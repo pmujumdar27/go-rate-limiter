@@ -79,6 +79,8 @@ func (s *Server) setupRoutes() {
 	s.router.POST("/rate-limit", rateLimitHandler.RateLimit)
 	s.router.POST("/rate-limit/reset", rateLimitHandler.ResetRateLimit)
 
+	handlers.RegisterMetricsRoute(s.router)
+
 	s.httpServer = &http.Server{
 		Addr:    s.config.Server.Port,
 		Handler: s.router,

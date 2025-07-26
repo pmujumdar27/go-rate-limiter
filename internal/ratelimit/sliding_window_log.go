@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pmujumdar27/go-rate-limiter/internal/config"
+	"github.com/pmujumdar27/go-rate-limiter/internal/metrics"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -45,6 +46,11 @@ func NewSlidingWindowLogRateLimiter(config SlidingWindowLogConfig, redisClient *
 }
 
 func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key string, timestamp time.Time) (RateLimitResponse, error) {
+	start := time.Now()
+	defer func() {
+		metrics.RateLimitDuration.WithLabelValues("sliding_window_log").Observe(time.Since(start).Seconds())
+	}()
+
 	redisKey := fmt.Sprintf("%s:%s", swl.keyPrefix, key)
 
 	currentTimestampNanos := timestamp.UnixNano()
@@ -86,14 +92,18 @@ func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key strin
 		return {1, current_count + 1, 0, remaining}
 	`
 
+	redisStart := time.Now()
 	result, err := swl.redisClient.Eval(ctx, script, []string{redisKey},
 		windowStartNanos, currentTimestampNanos, swl.bucketSize, swl.windowSizeSeconds, swl.ttlBuffer).Result()
+	metrics.RedisOperationDuration.WithLabelValues("eval").Observe(time.Since(redisStart).Seconds())
 
 	if err != nil {
+		metrics.RedisOperations.WithLabelValues("eval", "error").Inc()
 		return RateLimitResponse{
 			Err: err,
 		}, err
 	}
+	metrics.RedisOperations.WithLabelValues("eval", "success").Inc()
 
 	resultArray, ok := result.([]interface{})
 	if !ok || len(resultArray) < 3 {
@@ -130,6 +140,7 @@ func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key strin
 	}
 
 	if allowed == 1 {
+		metrics.RateLimitRequests.WithLabelValues("sliding_window_log", "allowed").Inc()
 		remainingRequests := int64(0)
 		if len(resultArray) > 3 {
 			if remaining, err := getInt64FromResult(resultArray[3]); err == nil {
@@ -146,6 +157,7 @@ func (swl *SlidingWindowLogRateLimiter) IsAllowed(ctx context.Context, key strin
 		}, nil
 	}
 
+	metrics.RateLimitRequests.WithLabelValues("sliding_window_log", "denied").Inc()
 	retryAfter := swl.calculateRetryAfter(&resetTime, timestamp)
 
 	return RateLimitResponse{

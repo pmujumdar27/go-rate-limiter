@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pmujumdar27/go-rate-limiter/internal/metrics"
 	"github.com/pmujumdar27/go-rate-limiter/internal/ratelimit"
 )
 
@@ -21,6 +22,11 @@ func NewRateLimitHandler(rateLimiter ratelimit.RateLimiter) *RateLimitHandler {
 }
 
 func (rlh *RateLimitHandler) RateLimit(c *gin.Context) {
+	start := time.Now()
+	defer func() {
+		metrics.HTTPRequestDuration.WithLabelValues("/rate-limit").Observe(time.Since(start).Seconds())
+	}()
+
 	clientID := c.GetHeader("X-Client-ID")
 	if clientID == "" {
 		clientID = c.ClientIP()
@@ -55,6 +61,11 @@ func (rlh *RateLimitHandler) RateLimit(c *gin.Context) {
 }
 
 func (rlh *RateLimitHandler) ResetRateLimit(c *gin.Context) {
+	start := time.Now()
+	defer func() {
+		metrics.HTTPRequestDuration.WithLabelValues("/rate-limit/reset").Observe(time.Since(start).Seconds())
+	}()
+
 	clientID := c.GetHeader("X-Client-ID")
 	if clientID == "" {
 		clientID = c.ClientIP()

@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/pmujumdar27/go-rate-limiter/internal/config"
+	"github.com/pmujumdar27/go-rate-limiter/internal/metrics"
+	"github.com/redis/go-redis/v9"
 )
 
 type SlidingWindowCounterConfig struct {
@@ -45,6 +46,11 @@ func NewSlidingWindowCounterRateLimiter(config SlidingWindowCounterConfig, redis
 }
 
 func (swc *SlidingWindowCounterRateLimiter) IsAllowed(ctx context.Context, key string, timestamp time.Time) (RateLimitResponse, error) {
+	start := time.Now()
+	defer func() {
+		metrics.RateLimitDuration.WithLabelValues("sliding_window_counter").Observe(time.Since(start).Seconds())
+	}()
+
 	redisKey := fmt.Sprintf("%s:%s", swc.keyPrefix, key)
 	currentTimestampNanos := timestamp.UnixNano()
 	currentWindowStart := (currentTimestampNanos / swc.windowSizeNanos) * swc.windowSizeNanos
@@ -109,12 +115,16 @@ func (swc *SlidingWindowCounterRateLimiter) IsAllowed(ctx context.Context, key s
 
 	ttlSeconds := (swc.windowSizeNanos/NanosecondsPerSecond)*2 + swc.ttlBuffer
 
+	redisStart := time.Now()
 	result, err := swc.redisClient.Eval(ctx, script, []string{redisKey},
 		currentWindowStart, previousWindowStart, swc.bucketSize, swc.windowSizeNanos, ttlSeconds, windowProgress).Result()
+	metrics.RedisOperationDuration.WithLabelValues("eval").Observe(time.Since(redisStart).Seconds())
 
 	if err != nil {
+		metrics.RedisOperations.WithLabelValues("eval", "error").Inc()
 		return RateLimitResponse{Err: err}, err
 	}
+	metrics.RedisOperations.WithLabelValues("eval", "success").Inc()
 
 	resultArray, ok := result.([]interface{})
 	if !ok || len(resultArray) < 5 {
@@ -166,6 +176,7 @@ func (swc *SlidingWindowCounterRateLimiter) IsAllowed(ctx context.Context, key s
 	}
 
 	if allowed == 1 {
+		metrics.RateLimitRequests.WithLabelValues("sliding_window_counter", "allowed").Inc()
 		remainingRequests := int64(0)
 		if len(resultArray) > 5 {
 			if remaining, err := getInt64FromResult(resultArray[5]); err == nil {
@@ -182,6 +193,7 @@ func (swc *SlidingWindowCounterRateLimiter) IsAllowed(ctx context.Context, key s
 		}, nil
 	}
 
+	metrics.RateLimitRequests.WithLabelValues("sliding_window_counter", "denied").Inc()
 	retryAfter := swc.calculateRetryAfter(currentCount, previousCount, currentWindowStart, currentTimestampNanos)
 
 	return RateLimitResponse{
