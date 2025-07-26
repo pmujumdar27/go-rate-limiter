@@ -41,7 +41,6 @@ func (rlh *RateLimitHandler) RateLimit(c *gin.Context) {
 		c.JSON(http.StatusTooManyRequests, gin.H{
 			"allowed":  false,
 			"metadata": response.Metadata,
-			"error":    response.Err,
 		})
 		return
 	}
@@ -49,7 +48,6 @@ func (rlh *RateLimitHandler) RateLimit(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"allowed":  true,
 		"metadata": response.Metadata,
-		"error":    response.Err,
 	})
 }
 

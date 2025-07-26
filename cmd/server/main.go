@@ -1,8 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pmujumdar27/go-rate-limiter/internal/config"
@@ -16,6 +22,7 @@ type Server struct {
 	redisClient     *redis.Client
 	strategyManager ratelimit.StrategyManager
 	router          *gin.Engine
+	httpServer      *http.Server
 }
 
 func NewServer(cfg *config.Config) (*Server, error) {
@@ -71,10 +78,40 @@ func (s *Server) setupRoutes() {
 
 	s.router.POST("/rate-limit", rateLimitHandler.RateLimit)
 	s.router.POST("/rate-limit/reset", rateLimitHandler.ResetRateLimit)
+
+	s.httpServer = &http.Server{
+		Addr:    s.config.Server.Port,
+		Handler: s.router,
+	}
 }
 
 func (s *Server) Run() error {
-	return s.router.Run(s.config.Server.Port)
+	go func() {
+		log.Printf("Starting server on %s", s.config.Server.Port)
+		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := s.httpServer.Shutdown(ctx); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+		return err
+	}
+
+	if err := s.redisClient.Close(); err != nil {
+		log.Printf("Error closing Redis connection: %v", err)
+	}
+
+	log.Println("Server exited")
+	return nil
 }
 
 func main() {
