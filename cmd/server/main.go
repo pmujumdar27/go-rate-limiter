@@ -49,6 +49,14 @@ func (s *Server) setupRedis() error {
 		Password: s.config.Redis.Password,
 		DB:       s.config.Redis.DB,
 	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := s.redisClient.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+
 	return nil
 }
 
@@ -59,7 +67,11 @@ func (s *Server) setupStrategyManager() error {
 
 func (s *Server) setupRoutes() {
 	s.router = gin.Default()
+	s.setupHandlers()
+	s.setupHTTPServer()
+}
 
+func (s *Server) setupHandlers() {
 	rateLimiter, err := s.strategyManager.GetCurrentStrategy()
 	if err != nil {
 		panic(fmt.Errorf("failed to get rate limiter from strategy manager: %w", err))
@@ -69,7 +81,6 @@ func (s *Server) setupRoutes() {
 	demoHandler := handlers.NewDemoHandler()
 
 	s.router.GET("/health", handlers.Health)
-
 	s.router.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"service": "go-rate-limiter",
@@ -86,7 +97,9 @@ func (s *Server) setupRoutes() {
 		api.GET("/unrestricted", demoHandler.UnrestrictedResource)
 		api.GET("/restricted", middleware.RateLimit(rateLimiter), demoHandler.RestrictedResource)
 	}
+}
 
+func (s *Server) setupHTTPServer() {
 	s.httpServer = &http.Server{
 		Addr:    s.config.Server.Port,
 		Handler: s.router,
