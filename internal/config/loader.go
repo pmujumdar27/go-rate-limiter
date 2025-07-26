@@ -37,6 +37,23 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("redis.port", 6379)
 	v.SetDefault("redis.db", 0)
 	v.SetDefault("redis.password", "")
+
+	v.SetDefault("rate_limiter.strategy", "sliding_window_counter")
+
+	v.SetDefault("rate_limiter.strategies.token_bucket.key_prefix", "rl:tb:")
+	v.SetDefault("rate_limiter.strategies.token_bucket.ttl_buffer_seconds", 5)
+	v.SetDefault("rate_limiter.strategies.token_bucket.bucket_size", 100)
+	v.SetDefault("rate_limiter.strategies.token_bucket.refill_rate_per_second", 10)
+
+	v.SetDefault("rate_limiter.strategies.sliding_window_log.key_prefix", "rl:swl:")
+	v.SetDefault("rate_limiter.strategies.sliding_window_log.ttl_buffer_seconds", 30)
+	v.SetDefault("rate_limiter.strategies.sliding_window_log.window_size_seconds", 3600)
+	v.SetDefault("rate_limiter.strategies.sliding_window_log.bucket_size", 1000)
+
+	v.SetDefault("rate_limiter.strategies.sliding_window_counter.key_prefix", "rl:swc:")
+	v.SetDefault("rate_limiter.strategies.sliding_window_counter.ttl_buffer_seconds", 15)
+	v.SetDefault("rate_limiter.strategies.sliding_window_counter.window_size_seconds", 3600)
+	v.SetDefault("rate_limiter.strategies.sliding_window_counter.bucket_size", 1000)
 }
 
 func loadConfigFile(v *viper.Viper) error {

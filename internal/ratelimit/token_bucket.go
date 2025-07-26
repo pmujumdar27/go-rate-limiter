@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/pmujumdar27/go-rate-limiter/internal/config"
 )
 
 type TokenBucketConfig struct {
 	BucketSize          int64
 	RefillRatePerSecond int64
 	KeyPrefix           string
-	TTLBuffer           time.Duration
+	TTLBufferSeconds    int
 }
 
 type TokenBucketRateLimiter struct {
@@ -29,9 +30,9 @@ func NewTokenBucketRateLimiter(config TokenBucketConfig, redisClient *redis.Clie
 		return nil, errors.New("invalid configuration")
 	}
 
-	ttlBuffer := config.TTLBuffer
-	if ttlBuffer <= 0 {
-		ttlBuffer = 60 * time.Second
+	ttlBufferSeconds := config.TTLBufferSeconds
+	if ttlBufferSeconds <= 0 {
+		ttlBufferSeconds = 60
 	}
 
 	return &TokenBucketRateLimiter{
@@ -39,7 +40,7 @@ func NewTokenBucketRateLimiter(config TokenBucketConfig, redisClient *redis.Clie
 		refillRatePerSecond: config.RefillRatePerSecond,
 		redisClient:         redisClient,
 		keyPrefix:           config.KeyPrefix,
-		ttlBuffer:           int64(ttlBuffer.Seconds()),
+		ttlBuffer:           int64(ttlBufferSeconds),
 	}, nil
 }
 
@@ -178,4 +179,51 @@ func (tb *TokenBucketRateLimiter) Reset(ctx context.Context, key string) error {
 	}
 
 	return nil
+}
+
+type TokenBucketConstructor struct{}
+
+func (c *TokenBucketConstructor) Name() string {
+	return "token_bucket"
+}
+
+func (c *TokenBucketConstructor) NewFromConfig(config map[string]interface{}, redisClient *redis.Client) (RateLimiter, error) {
+	bucketSize, err := getInt64Config(config, "bucket_size")
+	if err != nil {
+		return nil, fmt.Errorf("token bucket strategy: %w", err)
+	}
+	refillRate, err := getInt64Config(config, "refill_rate_per_second")
+	if err != nil {
+		return nil, fmt.Errorf("token bucket strategy: %w", err)
+	}
+	keyPrefix, err := getStringConfig(config, "key_prefix")
+	if err != nil {
+		return nil, fmt.Errorf("token bucket strategy: %w", err)
+	}
+	ttlBuffer, err := getIntConfig(config, "ttl_buffer_seconds")
+	if err != nil {
+		return nil, fmt.Errorf("token bucket strategy: %w", err)
+	}
+	
+	tokenBucketConfig := TokenBucketConfig{
+		BucketSize:          bucketSize,
+		RefillRatePerSecond: refillRate,
+		KeyPrefix:           keyPrefix,
+		TTLBufferSeconds:    ttlBuffer,
+	}
+	return NewTokenBucketRateLimiter(tokenBucketConfig, redisClient)
+}
+
+func (c *TokenBucketConstructor) ConvertConfig(rawConfig interface{}) (map[string]interface{}, error) {
+	cfg, ok := rawConfig.(config.TokenBucketConfig)
+	if !ok {
+		return nil, fmt.Errorf("expected TokenBucketConfig, got %T", rawConfig)
+	}
+	
+	return map[string]interface{}{
+		"key_prefix":             cfg.KeyPrefix,
+		"ttl_buffer_seconds":     cfg.TTLBufferSeconds,
+		"bucket_size":            cfg.BucketSize,
+		"refill_rate_per_second": cfg.RefillRatePerSecond,
+	}, nil
 }

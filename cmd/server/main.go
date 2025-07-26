@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pmujumdar27/go-rate-limiter/internal/config"
@@ -13,10 +12,10 @@ import (
 )
 
 type Server struct {
-	config      *config.Config
-	redisClient *redis.Client
-	rateLimiter ratelimit.RateLimiter
-	router      *gin.Engine
+	config          *config.Config
+	redisClient     *redis.Client
+	strategyManager ratelimit.StrategyManager
+	router          *gin.Engine
 }
 
 func NewServer(cfg *config.Config) (*Server, error) {
@@ -28,8 +27,8 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to setup redis: %w", err)
 	}
 
-	if err := server.setupRateLimiter(); err != nil {
-		return nil, fmt.Errorf("failed to setup rate limiter: %w", err)
+	if err := server.setupStrategyManager(); err != nil {
+		return nil, fmt.Errorf("failed to setup strategy manager: %w", err)
 	}
 
 	server.setupRoutes()
@@ -45,24 +44,20 @@ func (s *Server) setupRedis() error {
 	return nil
 }
 
-// TODO: Make this logic cleaner, and later maybe add an admin API to change the rate limiter
-func (s *Server) setupRateLimiter() error {
-	config := map[string]interface{}{
-		"window_size": 10 * time.Second,
-		"bucket_size": int64(10),
-	}
-
-	var err error
-	s.rateLimiter, err = ratelimit.NewRateLimiter(ratelimit.SlidingWindowCounterStrategy, s.redisClient, "rate_limit:swc", config)
-	if err != nil {
-		return err
-	}
+func (s *Server) setupStrategyManager() error {
+	s.strategyManager = ratelimit.NewConfigBasedStrategyManager(&s.config.RateLimiter, s.redisClient)
 	return nil
 }
 
 func (s *Server) setupRoutes() {
 	s.router = gin.Default()
-	rateLimitHandler := handlers.NewRateLimitHandler(s.rateLimiter)
+
+	rateLimiter, err := s.strategyManager.GetCurrentStrategy()
+	if err != nil {
+		panic(fmt.Errorf("failed to get rate limiter from strategy manager: %w", err))
+	}
+
+	rateLimitHandler := handlers.NewRateLimitHandler(rateLimiter)
 
 	s.router.GET("/health", handlers.Health)
 

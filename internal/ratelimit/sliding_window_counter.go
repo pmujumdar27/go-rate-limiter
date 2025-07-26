@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/pmujumdar27/go-rate-limiter/internal/config"
 )
 
 type SlidingWindowCounterConfig struct {
-	WindowSize time.Duration
-	BucketSize int64
-	KeyPrefix  string
-	TTLBuffer  time.Duration
+	WindowSize       time.Duration
+	BucketSize       int64
+	KeyPrefix        string
+	TTLBufferSeconds int
 }
 
 type SlidingWindowCounterRateLimiter struct {
@@ -29,9 +30,9 @@ func NewSlidingWindowCounterRateLimiter(config SlidingWindowCounterConfig, redis
 		return nil, errors.New("invalid configuration")
 	}
 
-	ttlBuffer := config.TTLBuffer
-	if ttlBuffer <= 0 {
-		ttlBuffer = 60 * time.Second
+	ttlBufferSeconds := config.TTLBufferSeconds
+	if ttlBufferSeconds <= 0 {
+		ttlBufferSeconds = 60
 	}
 
 	return &SlidingWindowCounterRateLimiter{
@@ -39,7 +40,7 @@ func NewSlidingWindowCounterRateLimiter(config SlidingWindowCounterConfig, redis
 		redisClient:     redisClient,
 		keyPrefix:       config.KeyPrefix,
 		bucketSize:      config.BucketSize,
-		ttlBuffer:       int64(ttlBuffer.Seconds()),
+		ttlBuffer:       int64(ttlBufferSeconds),
 	}, nil
 }
 
@@ -222,4 +223,52 @@ func (swc *SlidingWindowCounterRateLimiter) calculateRetryAfter(currentCount, pr
 	retryAfter := futureTimestamp - currentTimestamp
 
 	return time.Duration(retryAfter)
+}
+
+type SlidingWindowCounterConstructor struct{}
+
+func (c *SlidingWindowCounterConstructor) Name() string {
+	return "sliding_window_counter"
+}
+
+func (c *SlidingWindowCounterConstructor) NewFromConfig(config map[string]interface{}, redisClient *redis.Client) (RateLimiter, error) {
+	windowSize, err := getDurationConfig(config, "window_size")
+	if err != nil {
+		return nil, fmt.Errorf("sliding window counter strategy: %w", err)
+	}
+	bucketSize, err := getInt64Config(config, "bucket_size")
+	if err != nil {
+		return nil, fmt.Errorf("sliding window counter strategy: %w", err)
+	}
+	keyPrefix, err := getStringConfig(config, "key_prefix")
+	if err != nil {
+		return nil, fmt.Errorf("sliding window counter strategy: %w", err)
+	}
+	ttlBuffer, err := getIntConfig(config, "ttl_buffer_seconds")
+	if err != nil {
+		return nil, fmt.Errorf("sliding window counter strategy: %w", err)
+	}
+	
+	slidingWindowCounterConfig := SlidingWindowCounterConfig{
+		WindowSize:       windowSize,
+		BucketSize:       bucketSize,
+		KeyPrefix:        keyPrefix,
+		TTLBufferSeconds: ttlBuffer,
+	}
+	return NewSlidingWindowCounterRateLimiter(slidingWindowCounterConfig, redisClient)
+}
+
+func (c *SlidingWindowCounterConstructor) ConvertConfig(rawConfig interface{}) (map[string]interface{}, error) {
+	cfg, ok := rawConfig.(config.SlidingWindowCounterConfig)
+	if !ok {
+		return nil, fmt.Errorf("expected SlidingWindowCounterConfig, got %T", rawConfig)
+	}
+	
+	windowSize := time.Duration(cfg.WindowSizeSeconds) * time.Second
+	return map[string]interface{}{
+		"key_prefix":         cfg.KeyPrefix,
+		"ttl_buffer_seconds": cfg.TTLBufferSeconds,
+		"window_size":        windowSize,
+		"bucket_size":        cfg.BucketSize,
+	}, nil
 }

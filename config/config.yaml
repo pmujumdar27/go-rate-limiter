@@ -4,4 +4,27 @@ server:
 redis:
   host: "localhost"
   port: 6379
-  db: 0 
+  password: ""  # Set via GO_REDIS_PASSWORD environment variable
+  db: 0
+
+rate_limiter:
+  strategy: "sliding_window_counter"
+  
+  strategies:
+    token_bucket:
+      key_prefix: "rl:tb:"
+      ttl_buffer_seconds: 5
+      bucket_size: 10
+      refill_rate_per_second: 1
+    
+    sliding_window_log:
+      key_prefix: "rl:swl:"
+      ttl_buffer_seconds: 5
+      window_size_seconds: 10
+      bucket_size: 10
+    
+    sliding_window_counter:
+      key_prefix: "rl:swc:"
+      ttl_buffer_seconds: 5
+      window_size_seconds: 10
+      bucket_size: 10
