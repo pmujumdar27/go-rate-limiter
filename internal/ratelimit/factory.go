@@ -3,18 +3,21 @@ package ratelimit
 import (
 	"fmt"
 
+	"github.com/pmujumdar27/go-rate-limiter/internal/metrics"
 	"github.com/redis/go-redis/v9"
 )
 
 type Factory struct {
-	redisClient *redis.Client
-	strategies  map[string]StrategyConstructor
+	redisClient      *redis.Client
+	strategies       map[string]StrategyConstructor
+	metricsCollector metrics.Collector
 }
 
 func NewFactory(redisClient *redis.Client) *Factory {
 	f := &Factory{
-		redisClient: redisClient,
-		strategies:  make(map[string]StrategyConstructor),
+		redisClient:      redisClient,
+		strategies:       make(map[string]StrategyConstructor),
+		metricsCollector: metrics.NewNoopCollector(),
 	}
 
 	f.RegisterStrategy(&TokenBucketConstructor{})
@@ -34,7 +37,16 @@ func (f *Factory) CreateRateLimiter(strategy string, config map[string]interface
 		return nil, fmt.Errorf("unsupported rate limiter strategy: %s", strategy)
 	}
 
-	return constructor.NewFromConfig(config, f.redisClient)
+	rateLimiter, err := constructor.NewFromConfig(config, f.redisClient)
+	if err != nil {
+		return nil, err
+	}
+
+	if f.metricsCollector != nil {
+		return NewMetricsDecorator(rateLimiter, f.metricsCollector, strategy), nil
+	}
+
+	return rateLimiter, nil
 }
 
 func (f *Factory) GetAvailableStrategies() []string {
@@ -43,4 +55,9 @@ func (f *Factory) GetAvailableStrategies() []string {
 		strategies = append(strategies, name)
 	}
 	return strategies
+}
+
+func (f *Factory) WithMetrics(collector metrics.Collector) *Factory {
+	f.metricsCollector = collector
+	return f
 }

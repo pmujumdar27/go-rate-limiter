@@ -6,6 +6,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/pmujumdar27/go-rate-limiter/internal/config"
+	"github.com/pmujumdar27/go-rate-limiter/internal/metrics"
 )
 
 type StrategyManager interface {
@@ -23,10 +24,11 @@ type ConfigBasedStrategyManager struct {
 }
 
 func NewConfigBasedStrategyManager(cfg *config.RateLimiterConfig, redisClient *redis.Client) *ConfigBasedStrategyManager {
+	factory := NewFactory(redisClient).WithMetrics(metrics.NewPrometheusCollector())
 	return &ConfigBasedStrategyManager{
 		config:      cfg,
 		redisClient: redisClient,
-		factory:     NewFactory(redisClient),
+		factory:     factory,
 	}
 }
 

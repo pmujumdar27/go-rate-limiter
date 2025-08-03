@@ -91,6 +91,7 @@ func (s *Server) setupHandlers() {
 
 	s.router.POST("/rate-limit", rateLimitHandler.RateLimit)
 	s.router.POST("/rate-limit/reset", rateLimitHandler.ResetRateLimit)
+	s.router.GET("/metrics", handlers.MetricsHandler())
 
 	api := s.router.Group("/api")
 	{

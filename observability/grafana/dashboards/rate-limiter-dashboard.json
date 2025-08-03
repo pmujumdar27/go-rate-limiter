@@ -1,0 +1,274 @@
+{
+  "id": null,
+  "title": "Rate Limiter Performance Dashboard",
+  "tags": ["rate-limiter", "prometheus"],
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Rate Limit Decisions",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(rate(rate_limit_requests_total[5m])) by (decision)",
+          "legendFormat": "{{decision}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 80}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Success Rate",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(rate(rate_limit_requests_total{decision=\"allowed\"}[5m])) / sum(rate(rate_limit_requests_total[5m])) * 100",
+          "legendFormat": "Success %",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 50},
+              {"color": "green", "value": 80}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Rate Limit Decisions Over Time",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(rate_limit_requests_total{decision=\"allowed\"}[1m])) by (strategy)",
+          "legendFormat": "Allowed - {{strategy}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(rate_limit_requests_total{decision=\"denied\"}[1m])) by (strategy)",
+          "legendFormat": "Denied - {{strategy}}",
+          "refId": "B"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Latency Percentiles by Strategy",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(rate_limit_duration_seconds_bucket[5m])) by (le, strategy))",
+          "legendFormat": "p50 - {{strategy}}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(rate_limit_duration_seconds_bucket[5m])) by (le, strategy))",
+          "legendFormat": "p95 - {{strategy}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(rate_limit_duration_seconds_bucket[5m])) by (le, strategy))",
+          "legendFormat": "p99 - {{strategy}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 0
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Average Response Time",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(rate(rate_limit_duration_seconds_sum[5m])) / sum(rate(rate_limit_duration_seconds_count[5m]))",
+          "legendFormat": "Avg Response Time"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.001},
+              {"color": "red", "value": 0.01}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Request Rate",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(rate(rate_limit_requests_total[5m]))",
+          "legendFormat": "Requests/sec"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "thresholds"
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Current Strategy",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "count by (strategy) (rate_limit_requests_total)",
+          "legendFormat": "{{strategy}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [
+            {
+              "options": {
+                "1": {
+                  "text": "Active"
+                }
+              },
+              "type": "value"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Response Time Distribution",
+      "type": "heatmap",
+      "targets": [
+        {
+          "expr": "sum(rate(rate_limit_duration_seconds_bucket[5m])) by (le)",
+          "legendFormat": "{{le}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            }
+          }
+        }
+      }
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "schemaVersion": 30,
+  "version": 1,
+  "links": []
+}
