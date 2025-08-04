@@ -7,22 +7,11 @@ A Go-based rate limiter service with Redis backend supporting multiple rate limi
 - [Features](#features)
 - [Quick Start with Docker](#quick-start-with-docker)
 - [Rate Limiting Strategies](#rate-limiting-strategies)
-  - [Token Bucket](#token-bucket)
-  - [Sliding Window Log](#sliding-window-log)
-  - [Sliding Window Counter](#sliding-window-counter)
 - [API Endpoints](#api-endpoints)
 - [Configuration](#configuration)
 - [Architecture](#architecture)
-  - [System Overview](#system-overview)
-  - [Request Flow](#request-flow)
 - [Observability](#observability)
-  - [Prometheus Metrics](#prometheus-metrics)
-  - [Grafana Dashboard](#grafana-dashboard)
-  - [Health Checks](#health-checks)
 - [Self Notes](#self-notes)
-  - [TTL Buffer](#ttl-buffer)
-  - [Gotchas](#gotchas)
-  - [IETF RateLimit Headers](#ietf-ratelimit-headers)
 
 ## Features
 
@@ -196,6 +185,8 @@ A pre-configured Grafana dashboard is available for monitoring:
 - Performance metrics by strategy type
 - Redis connection and operation health
 - Request patterns and traffic analysis
+
+![Grafana Dashboard](assets/screenshots/Screenshot_4-8-2025_22457_localhost.jpeg)
 
 Access Grafana at `http://localhost:3000` when running with Docker Compose.
 

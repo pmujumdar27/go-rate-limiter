@@ -26,5 +26,5 @@ rate_limiter:
     sliding_window_counter:
       key_prefix: "rl:swc:"
       ttl_buffer_seconds: 5
-      window_size_seconds: 10
-      bucket_size: 10
+      window_size_seconds: 20
+      bucket_size: 100
